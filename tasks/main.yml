@@ -1,0 +1,83 @@
+---
+
+- include_vars: "{{ item }}"
+  with_first_found:
+    - "../vars/{{ ansible_distribution_release }}.yml"
+    - "../vars/{{ ansible_os_family }}.yml"
+    - "../vars/empty.yml"
+
+- name: 'Add the docker apt signing key'
+  become: yes
+  apt_key:
+    url: https://download.docker.com/linux/debian/gpg
+    # keyserver: 'pool.sks-keyservers.net'
+    # id: '7EA0A9C3F273FCD8'
+  when: ansible_os_family == "Debian" and docker_ppa_use|bool
+
+- name: 'Add the official docker repo'
+  become: yes
+  apt_repository:
+    repo: 'deb [arch=amd64] http://download.docker.com/linux/{{ansible_distribution|lower}} {{ ansible_distribution_release }} stable'
+    state: 'present'
+  when: ansible_os_family == "Debian" and docker_ppa_use|bool
+
+- name: 'Deny auto upgrade docker'
+  become: yes
+  template:
+    src: "preferences.d.j2"
+    dest: "/etc/apt/preferences.d/download_docker_com"
+    owner: root
+    group: root
+    mode: 0644
+  when: ansible_os_family == "Debian" and docker_ppa_use|bool and not docker_allow_upgrade|bool
+
+- name: 'Install docker'
+  become: yes
+  apt:
+    name: "{{ docker_package | map('regex_replace', '^(.*)$', '\\1='+docker_version) | list if docker_version != '' else docker_package }}"
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: Prepare folders
+  become: yes
+  file:
+    path: "/etc/docker/certs.d/{{ item }}"
+    mode: 0750
+    owner: root
+    group: root
+    state: directory
+  with_items:
+    - ''
+    - "{{ docker_domain_certs }}"
+
+- name: Copy certs
+  become: yes
+  copy: src="{{ playbook_dir }}/files/docker/{{ item }}/" dest="/etc/docker/certs.d/{{ item }}" mode=0640
+  with_items:
+    - "{{ docker_domain_certs }}"
+
+- name: 'Update docker daemon'
+  become: yes
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  when: item.when|bool
+  notify: docker-systemctl-reload
+  register: docker_config
+  with_items:
+    - { src: "docker.service.j2",         dest: "{{ docker_service_file }}",        mode: '0644', when: "{{ ansible_os_family == 'Debian' and docker_ppa_use }}" }
+    - { src: "daemon.json.j2",            dest: "/etc/docker/daemon.json",          mode: '0644', when: "true"                 }
+
+- meta: flush_handlers
+
+- name: 'Start the docker service'
+  become: yes
+  service:
+    name: 'docker'
+    state: "{% if ansible_virtualization_type|default('') != 'lxc' %}restarted{% else %}stopped{% endif %}"
+    enabled: "{{ ansible_virtualization_type|default('') != 'lxc' }}"
+  when: ansible_os_family == "Debian" and docker_service_restart|bool and docker_config.changed|bool

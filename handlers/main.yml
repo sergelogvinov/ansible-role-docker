@@ -1,0 +1,5 @@
+---
+
+- name: 'docker-systemctl-reload'
+  become: yes
+  shell: systemctl daemon-reload

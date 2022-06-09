@@ -1,0 +1,17 @@
+---
+
+docker_ppa_use: no
+docker_allow_upgrade: yes
+docker_package: ['docker-ce','docker-ce-cli']
+docker_version: ''
+
+docker_options:
+  log-opts:
+    max-size: "1G"
+    max-file: "2"
+
+docker_service_restart: true
+docker_service_params: ''
+docker_service_file: /lib/systemd/system/docker.service
+
+docker_domain_certs: []
